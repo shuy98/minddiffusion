@@ -63,7 +63,7 @@ class FeedForward(nn.Cell):
 
         self.net = nn.SequentialCell(
             project_in,
-            nn.Dropout(dropout),
+            nn.Dropout(p=1-dropout),
             nn.Dense(inner_dim, dim_out).to_float(dtype)
         )
 
@@ -113,7 +113,7 @@ class CrossAttention(nn.Cell):
 
         self.to_out = nn.SequentialCell(
             nn.Dense(inner_dim, query_dim).to_float(dtype),
-            nn.Dropout(dropout)
+            nn.Dropout(p=1-dropout)
         )
 
 

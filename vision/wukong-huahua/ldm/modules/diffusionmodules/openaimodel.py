@@ -18,7 +18,7 @@ import mindspore.ops as ops
 from ldm.modules.attention import SpatialTransformer
 from ldm.modules.diffusionmodules.util import (Identity, avg_pool_nd, conv_nd,
                                                linear, normalization,
-                                               timestep_embedding, zero_module)
+                                               timestep_embedding, zero_module, CustomSiLU)
 
 
 class Upsample(nn.Cell):
@@ -126,7 +126,7 @@ class ResBlock(nn.Cell):
         self.split = ops.Split(1, 2)
 
         self.in_layers_norm = normalization(channels)
-        self.in_layers_silu = nn.SiLU().to_float(self.dtype)
+        self.in_layers_silu = CustomSiLU().to_float(self.dtype)
         self.in_layers_conv = conv_nd(dims, channels, self.out_channels, 3,
                                       padding=1, has_bias=True, pad_mode='pad').to_float(self.dtype)
 
@@ -140,7 +140,7 @@ class ResBlock(nn.Cell):
             self.h_upd = self.x_upd = self.identity
 
         self.emb_layers = nn.SequentialCell(
-            nn.SiLU().to_float(self.dtype),
+            CustomSiLU().to_float(self.dtype),
             linear(
                 emb_channels,
                 2 * self.out_channels if use_scale_shift_norm else self.out_channels,
@@ -149,8 +149,8 @@ class ResBlock(nn.Cell):
         )
 
         self.out_layers_norm = normalization(self.out_channels)
-        self.out_layers_silu = nn.SiLU().to_float(self.dtype)
-        self.out_layers_drop = nn.Dropout(keep_prob=self.dropout)
+        self.out_layers_silu = CustomSiLU().to_float(self.dtype)
+        self.out_layers_drop = nn.Dropout(p=1-self.dropout)
         self.out_layers_conv = zero_module(
             conv_nd(dims, self.out_channels, self.out_channels, 3,
                     padding=1, has_bias=True, pad_mode='pad').to_float(self.dtype)
@@ -337,7 +337,7 @@ class UNetModel(nn.Cell):
         time_embed_dim = model_channels * 4
         self.time_embed = nn.SequentialCell(
             linear(model_channels, time_embed_dim, dtype=self.dtype),
-            nn.SiLU().to_float(self.dtype),
+            CustomSiLU().to_float(self.dtype),
             linear(time_embed_dim, time_embed_dim, dtype=self.dtype),
         )
 
@@ -519,7 +519,7 @@ class UNetModel(nn.Cell):
 
         self.out = nn.SequentialCell(
             normalization(ch),
-            nn.SiLU().to_float(self.dtype),
+            CustomSiLU().to_float(self.dtype),
             zero_module(conv_nd(dims, model_channels, out_channels, 3, padding=1,
                                 has_bias=True, pad_mode='pad').to_float(self.dtype)),
         )
