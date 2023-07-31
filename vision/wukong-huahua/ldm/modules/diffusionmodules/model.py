@@ -74,7 +74,7 @@ class ResnetBlock(nn.Cell):
                                       out_channels,
                                       bias_init='normal').to_float(dtype)
         self.norm2 = Normalize(out_channels)
-        self.dropout = nn.Dropout(1. - dropout)
+        self.dropout = nn.Dropout(p=dropout)
         self.conv2 = nn.Conv2d(out_channels,
                                out_channels,
                                kernel_size=3,

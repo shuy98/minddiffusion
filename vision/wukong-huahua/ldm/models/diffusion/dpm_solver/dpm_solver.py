@@ -18,10 +18,12 @@ import mindspore as ms
 import mindspore.nn as nn
 import mindspore.ops.function as F
 import mindspore.ops.operations as P
+import mindspore.ops as ops
 
 class NoiseScheduleVP(nn.Cell):
     def __init__(
             self,
+            batch_size,
             schedule='discrete',
             betas=None,
             alphas_cumprod=None,
@@ -81,6 +83,7 @@ class NoiseScheduleVP(nn.Cell):
         self.cast = P.Cast()
         self.cos = P.Cos()
         self.sqrt = P.Sqrt()
+        self.batch_size = batch_size
 
         assert schedule in ["discrete"]
 
@@ -100,7 +103,7 @@ class NoiseScheduleVP(nn.Cell):
         """
         Compute log(alpha_t) of a given continuous-time label t in [0, T].
         """
-        return F.reshape(interpolate_fn(F.reshape(t, (-1, 1)), self.t_array, self.log_alpha_array), (-1,))
+        return F.reshape(interpolate_fn(F.reshape(t, (self.batch_size, 1)), self.t_array, self.log_alpha_array), (-1,))
 
     def marginal_alpha(self, t):
         """
@@ -128,13 +131,13 @@ class NoiseScheduleVP(nn.Cell):
     """
         log_alpha = -0.5 * \
             F.log(F.exp(P.Zeros()((1,))) + F.exp(-2. * lamb))
-        t = interpolate_fn(log_alpha.reshape((-1, 1)), P.ReverseV2(axis=[1])(
+        t = interpolate_fn(log_alpha.reshape((self.batch_size, 1)), P.ReverseV2(axis=[1])(
             self.log_alpha_array), P.ReverseV2(axis=[1])(self.t_array))
         return t.reshape((-1,))
 
 
 class DPM_Solver(nn.Cell):
-    def __init__(self, model, steps=15, order=3, guidance_scale=1., lower_order_final=True, predict_x0=True, thresholding=False, max_val=1.):
+    def __init__(self, model, batch_size, steps=15, order=3, guidance_scale=1., lower_order_final=True, predict_x0=True, thresholding=False, max_val=1.):
         """Construct a DPM-Solver.
         We support both the noise prediction model ("predicting epsilon") and the data prediction model ("predicting x0").
         If `predict_x0` is False, we use the solver for the noise prediction model (DPM-Solver).
@@ -156,7 +159,7 @@ class DPM_Solver(nn.Cell):
         """
         super().__init__()
         
-        noise_schedule = NoiseScheduleVP('discrete', alphas_cumprod=model.alphas_cumprod)
+        noise_schedule = NoiseScheduleVP(batch_size, 'discrete', alphas_cumprod=model.alphas_cumprod)
 
         self.model = model
         self.noise_schedule = noise_schedule
@@ -168,6 +171,7 @@ class DPM_Solver(nn.Cell):
         self.thresholding = thresholding
         self.max_val = max_val
         self.cast = P.Cast()
+        self.batch_size = batch_size
 
     def get_model_input_time(self, t_continuous):
         """
@@ -199,6 +203,7 @@ class DPM_Solver(nn.Cell):
             c_in = F.concat([unconditional_condition, condition])
             noise_uncond, noise = F.split(
                 self.noise_pred_fn(x_in, t_in, cond=c_in), output_num=2)
+            noise_uncond, noise = P.Split(output_num=2)(self.noise_pred_fn((x_in, t_in, cond=c_in)))
             return noise_uncond + self.guidance_scale * (noise - noise_uncond)
 
     def data_prediction_fn(self, x, t, uc, c):
@@ -556,19 +561,19 @@ class DPM_Solver(nn.Cell):
         timesteps = self.get_time_steps(t_T=t_T, t_0=t_0, N=self.steps)
         assert timesteps.shape[0] - 1 == self.steps
 
-        vec_t = F.broadcast_to(timesteps[0], (x.shape[0],))
+        vec_t = F.broadcast_to(timesteps[0], (self.batch_size,))
         model_prev_list = [self.model_fn(x, vec_t, uc, c)]
         t_prev_list = [vec_t]
         # Init the first `order` values by lower order multistep DPM-Solver.
         for init_order in range(1, self.order):
-            vec_t = F.broadcast_to(timesteps[init_order], (x.shape[0],))
+            vec_t = F.broadcast_to(timesteps[init_order], (self.batch_size,))
             x = self.multistep_dpm_solver_update(
                 x, model_prev_list, t_prev_list, vec_t, init_order)
             model_prev_list.append(self.model_fn(x, vec_t, uc, c))
             t_prev_list.append(vec_t)
         # Compute the remaining values by `order`-th order multistep DPM-Solver.
         for step in range(self.order, self.steps + 1):
-            vec_t = F.broadcast_to(timesteps[step], (x.shape[0],))
+            vec_t = F.broadcast_to(timesteps[step], (self.batch_size,))
             if self.lower_order_final and self.steps < 15:
                 step_order = min(self.order, self.steps + 1 - step)
             else:
@@ -607,6 +612,7 @@ def interpolate_fn(x, xp, yp):
     cast = P.Cast()
 
     N, K = x.shape[0], xp.shape[1]
+    C = yp.shape[0]
     all_x = F.concat((expandd(x, 2), F.tile(
         expandd(xp, 0), (N, 1, 1))), axis=2)
     sorted_all_x, x_indices = P.Sort(axis=2)(all_x)
@@ -615,23 +621,23 @@ def interpolate_fn(x, xp, yp):
 
     start_idx = ms.numpy.where(
         equal(x_idx, 0),
-        ms.Tensor(1),
+        ms.Tensor(1).astype(ms.int32),
         ms.numpy.where(
-            equal(x_idx, K), ms.Tensor(K - 2), cand_start_idx,
+            equal(x_idx, K), ms.Tensor(K - 2).astype(ms.int32), cand_start_idx.astype(ms.int32),
         ),
     )
     end_idx = ms.numpy.where(
-        equal(start_idx, cand_start_idx), start_idx + 2, start_idx + 1)
+        equal(start_idx, cand_start_idx), (start_idx + 2).astype(ms.int32), (start_idx + 1).astype(ms.int32))
     start_x = gatherd(sorted_all_x, 2, expandd(start_idx, 2)).squeeze(2)
     end_x = gatherd(sorted_all_x, 2, expandd(end_idx, 2)).squeeze(2)
     start_idx2 = ms.numpy.where(
         equal(x_idx, 0),
-        ms.Tensor(0),
+        ms.Tensor(0).astype(ms.int32),
         ms.numpy.where(
-            equal(x_idx, K), ms.Tensor(K - 2), cand_start_idx,
+            equal(x_idx, K), ms.Tensor(K - 2).astype(ms.int32), cand_start_idx.astype(ms.int32),
         ),
     )
-    y_positions_expanded = F.broadcast_to(expandd(yp, 0), (N, -1, -1))
+    y_positions_expanded = F.broadcast_to(expandd(yp, 0), (N, C, K))
     start_y = gatherd(y_positions_expanded, 2,
                       expandd(start_idx2, 2)).squeeze(2)
     end_y = gatherd(y_positions_expanded, 2, expandd(

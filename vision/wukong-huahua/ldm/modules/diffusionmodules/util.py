@@ -93,9 +93,9 @@ def normalization(channels):
     return GroupNorm32(32, channels).to_float(ms.float32)
 
 
-class SiLU(nn.Cell):
+class CustomSiLU(nn.Cell):
     def __init__(self):
-        super(SiLU, self).__init__()
+        super(CustomSiLU, self).__init__()
         self.sigmoid = ops.Sigmoid()
 
     def construct(self, x):

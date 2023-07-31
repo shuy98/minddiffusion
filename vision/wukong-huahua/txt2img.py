@@ -72,13 +72,13 @@ class Txt2ImgInference(nn.Cell):
         self.batch_size = batch_size
         self.H = H
         self.W = W
-        self.sampler = DPM_Solver(model, steps, order, scale)
+        self.sampler = DPM_Solver(model, batch_size, steps, order, scale)
 
-    def construct(self, unconditional_condition_token, condition_token, img=None):
+    def construct(self, input_0_uncond_token, input_1_cond_token, img=None):
 
         unconditional_condition = self.model.cond_stage_model(
-            unconditional_condition_token)
-        condition = self.model.cond_stage_model(condition_token)
+            input_0_uncond_token)
+        condition = self.model.cond_stage_model(input_1_cond_token)
         if img is None:
             x = P.standard_normal((self.batch_size, 4, self.H // 8, self.W // 8))
         else:
@@ -138,6 +138,11 @@ def main(opt):
 
             unconditional_condition_token = tokenize(batch_size * [""])
             condition_token = tokenize(prompt)
+
+            # export mindir
+            ms.export(net_inference, unconditional_condition_token, condition_token, file_name=opt.output_mindir_name, file_format="MINDIR")
+
+            # run inference
             x_sample = net_inference(unconditional_condition_token, condition_token)
             x_samples_sample_numpy = x_sample.asnumpy()
             
@@ -280,6 +285,12 @@ if __name__ == "__main__":
         help="evaluate at this precision",
         choices=["full", "autocast"],
         default="autocast"
+    )
+    parser.add_argument(
+        "--output_mindir_name",
+        type=str,
+        help="dpecify name of the exported mindir",
+        default="output_mindir"
     )
     opt = parser.parse_args()
 
