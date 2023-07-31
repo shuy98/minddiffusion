@@ -74,15 +74,12 @@ class Txt2ImgInference(nn.Cell):
         self.W = W
         self.sampler = DPM_Solver(model, batch_size, steps, order, scale)
 
-    def construct(self, input_0_uncond_token, input_1_cond_token, img=None):
+    def construct(self, input_0_uncond_token, input_1_cond_token, input_2_img_shape):
 
         unconditional_condition = self.model.cond_stage_model(
             input_0_uncond_token)
         condition = self.model.cond_stage_model(input_1_cond_token)
-        if img is None:
-            x = P.standard_normal((self.batch_size, 4, self.H // 8, self.W // 8))
-        else:
-            x = ms.Tensor(img, dtype=ms.float32)
+        x = input_2_img_shape
         x_sample = self.sampler(x, unconditional_condition, condition)
 
         x_sample = self.model.decode_first_stage(x_sample)
@@ -138,12 +135,15 @@ def main(opt):
 
             unconditional_condition_token = tokenize(batch_size * [""])
             condition_token = tokenize(prompt)
+            x = ms.Tensor(shape=(1, 4, None, None), dtype=ms.float32)
+            net_inference.set_inputs(unconditional_condition_token, condition_token, x)
 
             # export mindir
-            ms.export(net_inference, unconditional_condition_token, condition_token, file_name=opt.output_mindir_name, file_format="MINDIR")
+            ms.export(net_inference, unconditional_condition_token, condition_token, x, file_name=opt.output_mindir_name, file_format="MINDIR")
 
             # run inference
-            x_sample = net_inference(unconditional_condition_token, condition_token)
+            x = P.standard_normal((1, 4, opt.H // 8, opt.w // 8))
+            x_sample = net_inference(unconditional_condition_token, condition_token, x)
             x_samples_sample_numpy = x_sample.asnumpy()
             
             if not opt.skip_save:

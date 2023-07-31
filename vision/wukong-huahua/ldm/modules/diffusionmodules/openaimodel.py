@@ -42,11 +42,15 @@ class Upsample(nn.Cell):
                                 padding=1, has_bias=True, pad_mode='pad').to_float(dtype)
 
     def construct(self, x, emb=None, context=None):
+        resize = ops.ResizeNearestNeighborV2(data_format='NCHW')
+        x_dyn_shape = ops.dyn_shape(x).astype(ms.int32)
+        dim_1 = x_dyn_shape[2].reshape((-1,)) * ms.Tensor([2], dtype=ms.int32)
+        dim_2 = x_dyn_shape[3].reshape((-1,)) * ms.Tensor([2], dtype=ms.int32)
+        dim_3 = x_dyn_shape[4].reshape((-1,)) * ms.Tensor([2], dtype=ms.int32)
         if self.dims == 3:
-            x = ops.ResizeNearestNeighbor(
-                (x.shape[2] * 2, x.shape[3] * 2, x.shape[4] * 2))(x)
+            x = resize(x, ops.cat((dim_1, dim_2, dim_3)))
         else:
-            x = ops.ResizeNearestNeighbor((x.shape[2] * 2, x.shape[3] * 2))(x)
+            x = resize(x, ops.cat((dim_1, dim_2)))
         if self.use_conv:
             x = self.conv(x)
         return x

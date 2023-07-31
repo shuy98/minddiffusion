@@ -42,9 +42,11 @@ class Upsample(nn.Cell):
                                   has_bias=True).to_float(dtype)
 
     def construct(self, x):
-        in_shape = x.shape[-2:]
-        out_shape = tuple(2 * x for x in in_shape)
-        x = P.ResizeNearestNeighbor(out_shape)(x)
+        resize = P.ResizeNearestNeighborV2(data_format='NCHW')
+        x_dyn_shape = P.dyn_shape(x).astype(ms.int32)
+        dim_1 = x_dyn_shape[2].reshape((-1,)) * ms.Tensor([2], dtype=ms.int32)
+        dim_2 = x_dyn_shape[3].reshape((-1,)) * ms.Tensor([2], dtype=ms.int32)
+        x = resize(x, P.cat((dim_1, dim_2)))
 
         if self.with_conv:
             x = self.conv(x)

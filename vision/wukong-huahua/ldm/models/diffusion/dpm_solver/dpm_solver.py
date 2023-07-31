@@ -201,9 +201,7 @@ class DPM_Solver(nn.Cell):
             x_in = F.concat([x] * 2)
             t_in = F.concat([t_continuous] * 2)
             c_in = F.concat([unconditional_condition, condition])
-            noise_uncond, noise = F.split(
-                self.noise_pred_fn(x_in, t_in, cond=c_in), output_num=2)
-            noise_uncond, noise = P.Split(output_num=2)(self.noise_pred_fn((x_in, t_in, cond=c_in)))
+            noise_uncond, noise = P.Split(output_num=2)(self.noise_pred_fn(x_in, t_in, cond=c_in))
             return noise_uncond + self.guidance_scale * (noise - noise_uncond)
 
     def data_prediction_fn(self, x, t, uc, c):
